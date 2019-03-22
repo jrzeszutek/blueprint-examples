@@ -1,6 +1,6 @@
 # End-to-End Multi-Cloud & Stack Lab Scenario For Azure
 
-This is the End-to-End blueprint, which automates the installation of the Multi-Cloud scenario.
+This is the End-to-End blueprint, which automates the installation of the [Multi-Cloud scenario (Part 2)](https://wp.cloudify.co/knowledge-base/multi-cloud-governance-solution-azure/#intermediate).
 
 ![multi-cloud-scenario](https://wp.cloudify.co/wp-content/uploads/2018/06/openstack-cloudify-drupal-azure-mariadb-768x313.png)
 
