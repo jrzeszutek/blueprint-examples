@@ -1,0 +1,100 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+description: >
+  This is the master blueprint for the Cloudify Multi-Cloud example. It provisions all the atomic components,
+  configures, and then chains them together. In partilucar:
+    * prepares the environment, including: networks, subnets, resource groups etc.
+    * provisions MariaDB VM on Azure
+    * provisions HAProxy VM on Azure
+    * provisions Drupal VM on OpenStack
+    * applies the configuration to create a service chain which will forward the traffic
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.5/types.yaml
+  - plugin:cloudify-utilities-plugin
+
+inputs:
+  network_prov_name:
+    description: Name of network resources provisioning blueprint/deployment
+    default: azure-example-network
+
+  db_prov_name:
+    description: Name of MariaDB Provisioning blueprint/deployment
+    default: db-azure
+
+  lb_prov_name:
+    description: Name of HAProxy Provisioning blueprint/deployment
+    default: lb-azure
+
+  app_prov_name:
+    description: Name of Drupal Provisioning blueprint/deployment
+    default: app-os
+
+node_templates:
+
+  network_prov:
+    type: cloudify.nodes.DeploymentProxy
+    properties:
+      resource_config:
+        blueprint:
+          id: { get_input: network_prov_name }
+          blueprint_archive: https://github.com/cloudify-examples/azure-example-network/archive/master.zip
+          main_file_name: simple-blueprint.yaml
+        deployment:
+          id: { get_input: network_prov_name }
+
+  db_prov:
+    type: cloudify.nodes.DeploymentProxy
+    properties:
+      resource_config:
+        blueprint:
+          id: { get_input: db_prov_name }
+          blueprint_archive: https://github.com/cloudify-examples/mariadb-blueprint/archive/master.zip
+          main_file_name: azure.yaml
+        deployment:
+          id: { get_input: db_prov_name }
+          outputs:
+            cluster_addresses: cluster_addresses
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: network_prov
+
+  lb_prov:
+    type: cloudify.nodes.DeploymentProxy
+    properties:
+      resource_config:
+        blueprint:
+          id: { get_input: lb_prov_name }
+          blueprint_archive: https://github.com/cloudify-examples/haproxy-blueprint/archive/master.zip
+          main_file_name: azure.yaml
+        deployment:
+          id: { get_input: lb_prov_name }
+          inputs:
+            application_ip: { get_attribute: [db_prov, deployment, outputs, cluster_addresses, 0] }
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: db_prov
+
+  app_prov:
+    type: cloudify.nodes.DeploymentProxy
+    properties:
+      resource_config:
+        blueprint:
+          id: { get_input: app_prov_name }
+          blueprint_archive: https://github.com/cloudify-examples/drupal-blueprint/archive/master.zip
+          main_file_name: openstack.yaml
+        deployment:
+          id: { get_input: app_prov_name }
+          inputs:
+            lb_deployment: { get_input: lb_prov_name }
+            db_deployment: { get_input: db_prov_name }
+          outputs:
+            endpoint: endpoint
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: lb_prov
+
+outputs:
+  endpoint:
+    description: Web server endpoint exposed on BIG IP Public interface
+    value: { get_attribute: [app_prov, deployment, outputs, endpoint] }
