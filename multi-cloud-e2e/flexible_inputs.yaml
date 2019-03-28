@@ -1,5 +1,0 @@
-use_existing_openstack_deployment: True
-use_existing_azure_deployment: False
-db_env: azure
-lb_env: azure
-app_env: openstack
