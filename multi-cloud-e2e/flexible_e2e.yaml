@@ -1,0 +1,128 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+description: >
+  This is the master blueprint for the Cloudify Multi-Cloud example. It provisions all the atomic components,
+  configures, and then chains them together. In partilucar:
+    * prepares the environment, including: networks, subnets, resource groups etc.
+    * provisions MariaDB VM on chosen IaaS
+    * provisions HAProxy VM on chosen IaaS
+    * provisions Drupal VM on chosen IaaS
+    * applies the configuration to create a service chain which will forward the traffic
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.5/types.yaml
+  - plugin:cloudify-utilities-plugin
+
+inputs:
+
+  use_existing_openstack_deployment:
+    default: True
+
+  use_existing_azure_deployment:
+    default: False
+
+  db_env:
+    description: Cloud environment on which MariaDB should be instantiated
+    default: azure
+
+  lb_env:
+    description: Cloud environment on which HAProxy should be instantiated
+    default: azure
+
+  app_env:
+    description: Cloud environment on which Drupal App should be instantiated
+    default: openstack
+
+node_templates:
+
+  openstack_network_prov:
+    type: cloudify.nodes.DeploymentProxy
+    properties:
+      resource_config:
+        blueprint:
+          id: openstack-example-network
+          blueprint_archive: https://github.com/cloudify-examples/openstack-example-network/archive/master.zip
+          main_file_name: simple-blueprint.yaml
+          external_resource: { get_input: use_existing_openstack_deployment }
+        deployment:
+          id: openstack-example-network
+          external_resource: { get_input: use_existing_openstack_deployment }
+
+  azure_network_prov:
+    type: cloudify.nodes.DeploymentProxy
+    properties:
+      resource_config:
+        blueprint:
+          id: azure-example-network
+          blueprint_archive: https://github.com/cloudify-examples/azure-example-network/archive/master.zip
+          main_file_name: simple-blueprint.yaml
+          external_resource: { get_input: use_existing_azure_deployment }
+        deployment:
+          id: azure-example-network
+          external_resource: { get_input: use_existing_azure_deployment }
+
+  db_prov:
+    type: cloudify.nodes.DeploymentProxy
+    properties:
+      resource_config:
+        blueprint:
+          id: { concat: [{ get_input: db_env }, "-db"] }
+          blueprint_archive: https://github.com/cloudify-examples/mariadb-blueprint/archive/master.zip
+          main_file_name: { concat: [{ get_input: db_env }, ".yaml"] }
+        deployment:
+          id: { concat: [{ get_input: db_env }, "-db"] }
+          outputs:
+            cluster_addresses: cluster_addresses
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: azure_network_prov
+      # - type: cloudify.relationships.depends_on
+      #   target: openstack_network_prov
+
+  lb_prov:
+    type: cloudify.nodes.DeploymentProxy
+    properties:
+      resource_config:
+        blueprint:
+          id: { concat: [{ get_input: lb_env }, "-lb"] }
+          blueprint_archive: https://github.com/cloudify-examples/haproxy-blueprint/archive/master.zip
+          main_file_name: { concat: [{ get_input: lb_env }, ".yaml"] }
+        deployment:
+          id: { concat: [{ get_input: lb_env }, "-lb"] }
+          inputs:
+            application_ip: { get_attribute: [db_prov, deployment, outputs, cluster_addresses, 0] }
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: azure_network_prov
+      # - type: cloudify.relationships.depends_on
+      #   target: openstack_network_prov
+      - type: cloudify.relationships.depends_on
+        target: db_prov
+
+  app_prov:
+    type: cloudify.nodes.DeploymentProxy
+    properties:
+      resource_config:
+        blueprint:
+          id: { concat: [{ get_input: app_env }, "-app"] }
+          blueprint_archive: https://github.com/cloudify-examples/drupal-blueprint/archive/master.zip
+          main_file_name: { concat: [{ get_input: app_env }, ".yaml"] }
+        deployment:
+          id: { concat: [{ get_input: app_env }, "-app"] }
+          inputs:
+            lb_deployment: { concat: [{ get_input: lb_env }, "-lb"] }
+            db_deployment: { concat: [{ get_input: db_env }, "-db"] }
+          outputs:
+            endpoint: endpoint
+    relationships:
+      # - type: cloudify.relationships.depends_on
+      #   target: azure_network_prov
+      - type: cloudify.relationships.depends_on
+        target: openstack_network_prov
+      - type: cloudify.relationships.depends_on
+        target: lb_prov
+
+outputs:
+  endpoint:
+    description: Web server endpoint exposed on BIG IP Public interface
+    value: { get_attribute: [app_prov, deployment, outputs, endpoint] }
